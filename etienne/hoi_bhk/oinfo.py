@@ -66,8 +66,28 @@ def bootci(o, x, comb, alpha, n_boots, rnd=0, n_jobs=-1):
     return pv, lower, upper
 
 
-def exhaustive_loop_zerolag(ts, maxsize=5, n_best=10, n_jobs=-1, n_boots=None,
-                            alpha=0.05):
+def combinations(n, k, groups=None):
+    assert isinstance(n, int)
+    if isinstance(k, int): k = [k]
+    assert isinstance(k, (list, tuple, np.ndarray))
+
+    iterable = np.arange(n)
+
+    combs = []
+    for i in k:
+        combs += [itertools.combinations(iterable, i) for i in k]
+    comb = itertools.chain(*tuple(combs))
+
+    for i in comb:
+        if isinstance(groups, (list, tuple)):
+            if all([k in i for k in groups]):
+                yield i
+        else:
+            yield i
+
+
+def exhaustive_loop_zerolag(ts, maxsize=5, n_best=10, groups=None, n_jobs=-1,
+                            n_boots=None, alpha=0.05):
     """Simple implementation of the Oinfo.
 
     Parameters
@@ -85,30 +105,25 @@ def exhaustive_loop_zerolag(ts, maxsize=5, n_best=10, n_jobs=-1, n_boots=None,
         maxsize = nvars
     maxsize = max(1, maxsize)
 
-    # get the combination object
-    oinfo, combinations, sizes = [], [], []
-    for _max in range(3, maxsize + 1):
-        # get all of the combinations
-        all_comb = itertools.combinations(range(0, nvars), _max)
+    # get all possible combinations and size
+    iterable = np.arange(3, maxsize + 1)
+    n_mults = sum(1 for _ in combinations(nvars, iterable, groups=groups))
+    all_comb = combinations(nvars, iterable, groups=groups)
 
-        # progressbar definition
-        pbar = tqdm.trange(int(special.comb(nvars, _max)), mininterval=3)
-        pbar.set_description(f"Multiplets of size {_max}")
-
-        # compute oinfo
-        outs = Parallel(n_jobs=n_jobs)(delayed(_o_info)(
+    # progressbar definition
+    pbar = tqdm.trange(n_mults, mininterval=3)
+    pbar.set_description(f'Computation of the Oinfo (n_multiplets={n_mults})')
+    outs = Parallel(n_jobs=n_jobs)(delayed(_o_info)(
             x[comb, :], comb) for comb, _ in zip(all_comb, pbar))
 
-        _oinfo, _combinations = zip(*outs)
-        oinfo.append(_oinfo)
-        combinations += np.array(_combinations).tolist()
-        sizes += [_max] * len(_oinfo)
+    # unwrap outputs
+    oinfo, combs = zip(*outs)
 
     # dataframe conversion
     df = pd.DataFrame({
-        'Combination': combinations,
-        'Oinfo': np.concatenate(oinfo),
-        'Size': sizes
+        'Combination': combs,
+        'Oinfo': oinfo,
+        'Size': [len(c) for c in combs]
     })
     df.sort_values('Oinfo', inplace=True, ascending=False)
 
@@ -174,8 +189,7 @@ if __name__ == '__main__':
     # exit()
 
     # ts = np.random.uniform(-1., 1., (15, 100))
-    df = exhaustive_loop_zerolag(ts, maxsize=3, n_jobs=1, n_boots=100,
-                                 n_best=20)
+    df = exhaustive_loop_zerolag(ts, maxsize=3, n_jobs=-1, n_boots=100,
+                                 n_best=20, groups=None)
     print(df)
-    df.to_excel('%s.xlsx' % file)
-    print(df)
+    # df.to_excel('%s.xlsx' % file)
