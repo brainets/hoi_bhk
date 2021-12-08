@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import itertools
 from sklearn.utils import resample
+import tqdm
+from scipy import special
 
 from joblib import Parallel, delayed
 
@@ -30,10 +32,6 @@ def nb_ent_g(x):
 
 
 def _o_info(x, comb, return_comb=True):
-    # (n_variables, n_samples)
-    # if len(comb) == 1:  #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    #     return nb_ent_g(x), comb
-
     nvars, _ = x.shape
 
     # (n - 2) * H(X^n)
@@ -90,14 +88,16 @@ def exhaustive_loop_zerolag(ts, maxsize=5, n_best=10, n_jobs=-1, n_boots=None,
     # get the combination object
     oinfo, combinations, sizes = [], [], []
     for _max in range(3, maxsize + 1):
-        print(f"Multiplets of size {_max}")
-
         # get all of the combinations
         all_comb = itertools.combinations(range(0, nvars), _max)
 
+        # progressbar definition
+        pbar = tqdm.trange(int(special.comb(nvars, _max)), mininterval=3)
+        pbar.set_description(f"Multiplets of size {_max}")
+
         # compute oinfo
         outs = Parallel(n_jobs=n_jobs)(delayed(_o_info)(
-            x[comb, :], comb) for comb in all_comb)
+            x[comb, :], comb) for comb, _ in zip(all_comb, pbar))
 
         _oinfo, _combinations = zip(*outs)
         oinfo.append(_oinfo)
@@ -124,13 +124,17 @@ def exhaustive_loop_zerolag(ts, maxsize=5, n_best=10, n_jobs=-1, n_boots=None,
         syn_ind = np.logical_and(syn_ind, df['Oinfo'] < 0)
         # merge both
         redsyn_ind = np.logical_or(red_ind, syn_ind)
-
         df = df.loc[redsyn_ind]
 
     # statistics
     if isinstance(n_boots, int):
+        # progressbar definition
+        pbar = tqdm.trange(len(df), mininterval=3.)
+        pbar.set_description(f"Computes statistics (n_boots={n_boots}; "
+                             f"n_best={n_best})")
+
         pv, cilow, cihigh = [], [], []
-        for o, comb in zip(df['Oinfo'], df['Combination']):
+        for o, comb, _ in zip(df['Oinfo'], df['Combination'], pbar):
             _pv, _low, _high = bootci(o, x[comb, :], comb, alpha, n_boots,
                                       n_jobs=n_jobs)
             pv.append(_pv)
@@ -170,7 +174,8 @@ if __name__ == '__main__':
     # exit()
 
     # ts = np.random.uniform(-1., 1., (15, 100))
-    df = exhaustive_loop_zerolag(ts, maxsize=3, n_jobs=-1, n_boots=100, n_best=20)  #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    df = exhaustive_loop_zerolag(ts, maxsize=3, n_jobs=1, n_boots=100,
+                                 n_best=20)
     print(df)
     df.to_excel('%s.xlsx' % file)
     print(df)
